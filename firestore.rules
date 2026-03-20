@@ -1,0 +1,130 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required) - The unique Firebase Auth ID.
+//   - email: string (required, email format) - The user's email address.
+//   - displayName: string (optional) - The user's display name.
+//   - photoURL: string (optional) - The user's profile photo URL.
+//   - createdAt: string (required, date-time format) - When the user was first created.
+//
+// Collection: users/{userId}/chats
+// Document ID: {chatId}
+// Fields:
+//   - id: string (required) - Unique ID for the chat.
+//   - userId: string (required) - The ID of the user who owns this chat.
+//   - title: string (required) - The title of the conversation.
+//   - createdAt: number (required) - Timestamp when the chat was created.
+//   - updatedAt: number (required) - Timestamp when the chat was last updated.
+//
+// Collection: users/{userId}/chats/{chatId}/messages
+// Document ID: {messageId}
+// Fields:
+//   - role: string (required, enum: ["user", "model"]) - Who sent the message.
+//   - parts: list (required) - The content of the message.
+//   - createdAt: number (required) - Timestamp when the message was sent.
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'createdAt']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.uid is string &&
+             data.createdAt is string;
+    }
+
+    function isValidChat(data, userId) {
+      return hasRequiredFields(['title', 'createdAt', 'updatedAt', 'userId']) &&
+             hasOnlyAllowedFields(['id', 'title', 'createdAt', 'updatedAt', 'userId']) &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 100 &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['role', 'parts', 'createdAt']) &&
+             hasOnlyAllowedFields(['role', 'parts', 'createdAt']) &&
+             data.role in ['user', 'model'] &&
+             data.parts is list &&
+             data.createdAt is number;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User profile
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      request.resource.data.uid == resource.data.uid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    // User chats
+    match /users/{userId}/chats/{chatId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidChat(request.resource.data, userId);
+      allow update: if isOwner(userId) && isValidChat(request.resource.data, userId) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+    }
+
+    // Chat messages
+    match /users/{userId}/chats/{chatId}/messages/{messageId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidMessage(request.resource.data);
+      allow update: if isOwner(userId) && isValidMessage(request.resource.data) &&
+                      request.resource.data.role == resource.data.role &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Bihar AI",
+  "description": "Bihar AI ek chat aur voice model hai. Jo image dekh Kar Bata sakta hai main jis mein kya likha hai pura samjha sakta hun Bihar Bharat ke pura leagues samjh sakta hai",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
